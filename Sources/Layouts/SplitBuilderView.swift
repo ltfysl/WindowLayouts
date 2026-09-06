@@ -35,8 +35,11 @@ struct SplitBuilderView: View {
     @State private var displaySlot = 0
     @State private var selections: [Int: AppOption] = [:]
     @State private var customName = ""
+    /// Cached once on appear — re-evaluating NSWorkspace per render (e.g.
+    /// every keystroke in the name field) caused picker flicker and wasted cycles.
+    @State private var apps: [AppOption] = []
 
-    private var apps: [AppOption] {
+    private static func loadApps() -> [AppOption] {
         var seen = Set<String>()
         return NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular && !$0.isTerminated }
@@ -113,6 +116,9 @@ struct SplitBuilderView: View {
             .padding(14)
         }
         .frame(width: 560, height: 440)
+        .task {
+            if apps.isEmpty { apps = Self.loadApps() }
+        }
         .onAppear {
             if displaySlot >= ScreenLayout.sortedByX.count {
                 displaySlot = 0

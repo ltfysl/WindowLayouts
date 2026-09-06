@@ -7,11 +7,15 @@ struct LayoutThumb: View {
     let layout: SavedLayout
 
     private static let palette: [Color] = [.blue, .orange, .green, .purple, .pink, .teal, .indigo, .yellow]
+    private static var colorCache: [String: Color] = [:]
 
     static func appColor(_ name: String) -> Color {
+        if let cached = colorCache[name] { return cached }
         let hash = name.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }
         let index = (hash % palette.count + palette.count) % palette.count
-        return palette[index]
+        let color = palette[index]
+        colorCache[name] = color
+        return color
     }
 
     var body: some View {

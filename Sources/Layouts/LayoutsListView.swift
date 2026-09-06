@@ -191,7 +191,12 @@ struct LayoutsListView: View {
 
     private func watchTrustStatus() async {
         while !Task.isCancelled {
-            axTrusted = AXBridge.isTrusted
+            let trusted = AXBridge.isTrusted
+            if axTrusted != trusted {
+                axTrusted = trusted
+            }
+            // Granted → stop polling for this panel session.
+            if trusted { return }
             try? await Task.sleep(for: .seconds(2))
         }
     }

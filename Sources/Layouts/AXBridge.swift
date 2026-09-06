@@ -17,7 +17,11 @@ enum AXBridge {
     static let accessibilityPane = URL(string: "x-apple.systemsettings:com.apple.preference.security?Privacy_Accessibility")!
 
     static func windows(of app: NSRunningApplication) -> [AXUIElement] {
-        let appElement = AXUIElementCreateApplication(app.processIdentifier)
+        windows(ofPID: app.processIdentifier)
+    }
+
+    static func windows(ofPID pid: pid_t) -> [AXUIElement] {
+        let appElement = AXUIElementCreateApplication(pid)
         var raw: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &raw)
         guard result == .success else { return [] }

@@ -10,6 +10,7 @@ struct CaptureView: View {
     @State private var snapshots: [WindowSnapshot] = []
     @State private var excluded: Set<UUID> = []
     @State private var name = ""
+    @State private var isScanning = false
 
     private func close() {
         if let onClose { onClose() } else { dismiss() }
@@ -44,8 +45,13 @@ struct CaptureView: View {
             Text("Capture Window Layout")
                 .font(.headline)
             Spacer()
+            if isScanning {
+                ProgressView()
+                    .controlSize(.small)
+            }
             Button("Recapture") { recapture() }
                 .controlSize(.small)
+                .disabled(isScanning)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -114,11 +120,20 @@ struct CaptureView: View {
         .padding(14)
     }
 
+    /// Metadata pass on main, parallel AX reads off-main — the window never
+    /// freezes even with many apps.
     private func recapture() {
-        snapshots = LayoutCapturer.captureCurrentWindows()
-        excluded.removeAll()
-        if name.trimmingCharacters(in: .whitespaces).isEmpty {
-            name = "Layout " + Date.now.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+        guard !isScanning else { return }
+        isScanning = true
+        let appInfos = LayoutCapturer.appInfos()
+        Task {
+            let captured = await LayoutCapturer.captureCurrentWindows(appInfos: appInfos)
+            snapshots = captured
+            excluded.removeAll()
+            if name.trimmingCharacters(in: .whitespaces).isEmpty {
+                name = "Layout " + Date.now.formatted(.dateTime.month(.abbreviated).day().hour().minute())
+            }
+            isScanning = false
         }
     }
 
