@@ -6,8 +6,14 @@ import SwiftUI
 /// captured layout (including multi-monitor scaling).
 struct SplitBuilderView: View {
     let store: LayoutStore
+    /// Called instead of dismiss when hosted in a standalone window.
+    var onClose: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
+    }
 
     enum Template: String, CaseIterable, Identifiable {
         case leftRight = "Left | Right"
@@ -99,7 +105,7 @@ struct SplitBuilderView: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }
+                Button("Cancel") { close() }
                 Button("Create Split", action: create)
                     .buttonStyle(.borderedProminent)
                     .disabled(chosenCount == 0)
@@ -172,21 +178,32 @@ struct SplitBuilderView: View {
         }
     }
 
-    private func buildLayout() -> SavedLayout {
+    private func buildLayout(includePlaceholders: Bool = false) -> SavedLayout {
         let frames = slotFrames(in: ScreenLayout.visibleFrame(atSlot: displaySlot))
         var windows: [WindowSnapshot] = []
         for slot in 0..<template.slotCount {
-            guard let app = selections[slot] else { continue }
-            windows.append(WindowSnapshot.make(
-                bundleID: app.bundleID,
-                appName: app.name,
-                title: "<split \(slot + 1)>",
-                frame: frames[slot],
-                slot: windows.count
-            ))
+            if let app = selections[slot] {
+                windows.append(WindowSnapshot.make(
+                    bundleID: app.bundleID,
+                    appName: app.name,
+                    title: "<split \(slot + 1)>",
+                    frame: frames[slot],
+                    slot: windows.count
+                ))
+            } else if includePlaceholders {
+                windows.append(WindowSnapshot.make(
+                    bundleID: "preview",
+                    appName: "Slot \(slot + 1)",
+                    title: "",
+                    frame: frames[slot],
+                    slot: windows.count
+                ))
+            }
         }
         let slotNames = (0..<template.slotCount).compactMap { selections[$0]?.name }
-        let autoName = "Split · " + slotNames.joined(separator: " | ")
+        let autoName = slotNames.isEmpty
+            ? "Split · \(template.rawValue)"
+            : "Split · " + slotNames.joined(separator: " | ")
         let name = customName.trimmingCharacters(in: .whitespaces).isEmpty
             ? autoName
             : customName.trimmingCharacters(in: .whitespaces)
@@ -200,13 +217,13 @@ struct SplitBuilderView: View {
     }
 
     private var previewLayout: SavedLayout {
-        buildLayout()
+        buildLayout(includePlaceholders: true)
     }
 
     private func create() {
         let layout = buildLayout()
         guard !layout.windows.isEmpty else { return }
         store.add(layout)
-        dismiss()
+        close()
     }
 }

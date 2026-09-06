@@ -3,11 +3,17 @@ import SwiftUI
 
 struct CaptureView: View {
     let store: LayoutStore
+    /// Called instead of dismiss when hosted in a standalone window.
+    var onClose: (() -> Void)? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var snapshots: [WindowSnapshot] = []
     @State private var excluded: Set<UUID> = []
     @State private var name = ""
+
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
+    }
 
     private var included: [WindowSnapshot] {
         snapshots.filter { !excluded.contains($0.id) }
@@ -100,7 +106,7 @@ struct CaptureView: View {
                 .monospacedDigit()
                 .foregroundStyle(.secondary)
                 .fixedSize()
-            Button("Cancel") { dismiss() }
+            Button("Cancel") { close() }
             Button("Save Layout", action: save)
                 .buttonStyle(.borderedProminent)
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || included.isEmpty)
@@ -123,7 +129,7 @@ struct CaptureView: View {
             windows: included
         )
         store.add(layout)
-        dismiss()
+        close()
     }
 
     @ViewBuilder

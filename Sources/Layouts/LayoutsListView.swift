@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct LayoutsListView: View {
@@ -5,37 +6,30 @@ struct LayoutsListView: View {
     let restorer: LayoutRestorer
 
     @State private var axTrusted = AXBridge.isTrusted
-    @State private var isCapturing = false
-    @State private var isBuildingSplit = false
     @State private var renameTarget: SavedLayout?
     @State private var renameText = ""
     @State private var deleteTarget: SavedLayout?
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider().opacity(0.4)
-            if !axTrusted {
-                PermissionBanner()
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
+            if axTrusted {
+                if restorer.isRestoring || !restorer.statusText.isEmpty {
+                    RestoreBanner(restorer: restorer)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 8)
+                }
+                content
+            } else {
+                PermissionCard
             }
-            if restorer.isRestoring || !restorer.statusText.isEmpty {
-                RestoreBanner(restorer: restorer)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 10)
-            }
-            content
+            footer
         }
-        .frame(width: 430)
-        .frame(maxHeight: 580)
+        .frame(width: 470)
+        .frame(minHeight: 400, idealHeight: 540, maxHeight: 640)
         .task { await watchTrustStatus() }
-        .sheet(isPresented: $isCapturing) {
-            CaptureView(store: store)
-        }
-        .sheet(isPresented: $isBuildingSplit) {
-            SplitBuilderView(store: store)
-        }
         .alert("Rename Layout", isPresented: Binding(
             get: { renameTarget != nil },
             set: { if !$0 { renameTarget = nil } }
@@ -68,35 +62,34 @@ struct LayoutsListView: View {
         }
     }
 
+    // MARK: - Header
+
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "rectangle.split.2x2")
-                .foregroundStyle(.secondary)
-            Text("Window Layouts")
-                .font(.headline)
+                .foregroundStyle(Tokens.accent)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Layouts").font(.headline)
+                Text("Click a card to restore")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
             Spacer()
-            Button {
-                isBuildingSplit = true
-            } label: {
-                Label("Split", systemImage: "rectangle.split.2x1")
-                    .labelStyle(.titleAndIcon)
+            HoverButton(systemImage: "rectangle.split.2x1", help: "Quick Split — arrange apps into halves/thirds") {
+                SplitWindowController.shared.show(store: store)
             }
-            .controlSize(.small)
-            .buttonStyle(.bordered)
-            .disabled(!axTrusted || restorer.isRestoring)
-            Button {
-                isCapturing = true
-            } label: {
-                Label("Capture", systemImage: "plus.viewfinder")
-                    .labelStyle(.titleAndIcon)
+            .disabled(!axTrusted)
+            HoverButton(systemImage: "plus.viewfinder", help: "Capture current windows") {
+                CaptureWindowController.shared.show(store: store)
             }
-            .controlSize(.small)
-            .buttonStyle(.borderedProminent)
-            .disabled(!axTrusted || restorer.isRestoring)
+            .disabled(!axTrusted)
+            HoverButton(systemImage: "gearshape", help: "Settings") { openSettings() }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
     }
+
+    // MARK: - Content
 
     @ViewBuilder
     private var content: some View {
@@ -105,21 +98,30 @@ struct LayoutsListView: View {
                 ContentUnavailableView {
                     Label("No layouts yet", systemImage: "rectangle.on.rectangle.slash")
                 } description: {
-                    Text("Arrange your windows, then capture the arrangement to bring it back any time.")
+                    Text("Arrange your windows, then capture the arrangement — or build a split from a template.")
                 }
-                Button("Capture Current Windows") {
-                    isCapturing = true
+                HStack(spacing: 8) {
+                    Button {
+                        CaptureWindowController.shared.show(store: store)
+                    } label: {
+                        Label("Capture Windows", systemImage: "plus.viewfinder")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    Button {
+                        SplitWindowController.shared.show(store: store)
+                    } label: {
+                        Label("Quick Split", systemImage: "rectangle.split.2x1")
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(!axTrusted)
                 .padding(.bottom, 16)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
-                LazyVStack(spacing: 4) {
+                LazyVStack(spacing: 8) {
                     ForEach(Array(store.layouts.enumerated()), id: \.element.id) { index, layout in
-                        LayoutRow(
+                        LayoutCard(
                             layout: layout,
                             hotkeyDigit: index < 9 ? index + 1 : nil,
                             isBusy: restorer.isRestoring,
@@ -133,10 +135,58 @@ struct LayoutsListView: View {
                         )
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
             }
+            .frame(minHeight: 300)
         }
+    }
+
+    // MARK: - Permission card (replaces the silent dead-state)
+
+    private var PermissionCard: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(.orange)
+            Text("Accessibility required")
+                .font(.headline)
+            Text("Layouts reads and moves windows through the Accessibility API. Grant access once — then click any card to restore the arrangement.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 320)
+            Button {
+                AXBridge.promptForTrust()
+            } label: {
+                Label("Grant Accessibility", systemImage: "hand.tap.fill")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            Text("If you already granted it, the panel re-enables itself within seconds.")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(12)
+    }
+
+    private var footer: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(axTrusted ? Color.green : Color.orange)
+                .frame(width: 6, height: 6)
+            Text(axTrusted
+                 ? (restorer.statusText.isEmpty ? "Ready · ⌥⌘⌃1–9 restores hotkeys" : restorer.statusText)
+                 : "Waiting for Accessibility permission…")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.primary.opacity(0.04))
     }
 
     private func watchTrustStatus() async {
@@ -147,7 +197,9 @@ struct LayoutsListView: View {
     }
 }
 
-private struct LayoutRow: View {
+// MARK: - Card
+
+private struct LayoutCard: View {
     let layout: SavedLayout
     let hotkeyDigit: Int?
     let isBusy: Bool
@@ -158,19 +210,25 @@ private struct LayoutRow: View {
 
     @State private var isHovered = false
 
-    private var subtitle: String {
-        var parts = ["\(layout.windows.count) windows", "\(layout.appBundles.count) apps"]
-        if layout.displays.count > 1 {
-            parts.append("\(layout.displays.count) displays")
+    var body: some View {
+        Button(action: onRestore) {
+            cardContent
         }
-        return parts.joined(separator: " · ")
+        .buttonStyle(LayoutCardButtonStyle(isHovered: isHovered))
+        .overlay(alignment: .topTrailing) {
+            kebabMenu.padding(6)
+        }
+        .onHover { isHovered = $0 }
+        .disabled(isBusy)
+        .help("Click to restore this layout")
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
     }
 
-    var body: some View {
-        HStack(spacing: 10) {
+    private var cardContent: some View {
+        HStack(spacing: 12) {
             LayoutThumb(layout: layout)
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     if layout.kind == .split {
                         Image(systemName: "rectangle.split.2x1")
@@ -178,13 +236,18 @@ private struct LayoutRow: View {
                             .foregroundStyle(Tokens.accent)
                     }
                     Text(layout.name)
-                        .font(.callout.weight(.medium))
+                        .font(.callout.weight(.semibold))
                         .lineLimit(1)
                 }
                 Text(subtitle)
                     .font(.caption)
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
+                if layout.displays.count > 1 {
+                    Text("Multi-monitor layout")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
             }
 
             Spacer(minLength: 4)
@@ -196,93 +259,65 @@ private struct LayoutRow: View {
                     .foregroundStyle(.secondary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(
-                        RoundedRectangle(cornerRadius: 4)
-                            .fill(Color.primary.opacity(0.05))
-                    )
+                    .background(RoundedRectangle(cornerRadius: 4).fill(Color.primary.opacity(0.06)))
             }
-
-            Button("Restore", action: onRestore)
-                .controlSize(.small)
-                .buttonStyle(.borderedProminent)
-                .disabled(isBusy)
-
-            Menu {
-                Button("Rename…", action: onRename)
-                Button("Duplicate", action: onDuplicate)
-                Divider()
-                Button("Delete…", role: .destructive, action: onDelete)
-            } label: {
-                Image(systemName: "ellipsis.circle")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .disabled(isBusy)
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: Tokens.rowCornerRadius)
-                .fill(Color.primary.opacity(isHovered ? 0.06 : 0))
-        )
-        .contentShape(RoundedRectangle(cornerRadius: Tokens.rowCornerRadius))
-        .onHover { isHovered = $0 }
-        // One click restores the whole arrangement ("bei Klick setzt er das zurück").
-        .onTapGesture { onRestore() }
-        .help("Click to restore this layout")
-    }
-}
-
-private struct AppIconStack: View {
-    let bundles: [String]
-
-    var body: some View {
-        HStack(spacing: -6) {
-            ForEach(Array(bundles.prefix(4).enumerated()), id: \.offset) { index, bundleID in
-                icon(for: bundleID)
-                    .zIndex(Double(10 - index))
-            }
-        }
-        .frame(width: 52)
-    }
-
-    @ViewBuilder
-    private func icon(for bundleID: String) -> some View {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path))
-                .resizable()
-                .scaledToFit()
-                .frame(width: 22, height: 22)
-                .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
-        } else {
-            Image(systemName: "app.dashed")
-                .frame(width: 22, height: 22)
-                .foregroundStyle(.tertiary)
-        }
-    }
-}
-
-private struct PermissionBanner: View {
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "lock.shield")
-                .foregroundStyle(.orange)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Accessibility permission needed")
-                    .font(.callout.weight(.medium))
-                Text("Layouts reads and moves windows through the Accessibility API.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button("Grant") { AXBridge.promptForTrust() }
-                .controlSize(.small)
         }
         .padding(10)
-        .background(RoundedRectangle(cornerRadius: Tokens.controlCornerRadius).fill(Color.orange.opacity(0.12)))
+        .contentShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var subtitle: String {
+        var parts = ["\(layout.windows.count) windows", "\(layout.appBundles.count) apps"]
+        if layout.displays.count > 1 {
+            parts.append("\(layout.displays.count) displays")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private var kebabMenu: some View {
+        Menu {
+            Button("Restore") { onRestore() }
+            Divider()
+            Button("Rename…", action: onRename)
+            Button("Duplicate", action: onDuplicate)
+            Divider()
+            Button("Delete…", role: .destructive, action: onDelete)
+        } label: {
+            Image(systemName: "ellipsis.circle.fill")
+                .font(.system(size: 14))
+                .foregroundStyle(Color.primary.opacity(0.35))
+                .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 }
+
+/// Card button style: hover fill + accent border, pressed feedback.
+struct LayoutCardButtonStyle: ButtonStyle {
+    let isHovered: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.primary.opacity(isHovered ? 0.07 : 0.035))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(
+                        isHovered ? Tokens.accent.opacity(0.6) : Color.primary.opacity(0.10),
+                        lineWidth: 1
+                    )
+            )
+            .scaleEffect(configuration.isPressed ? 0.985 : 1)
+            .animation(.easeInOut(duration: 0.12), value: configuration.isPressed)
+            .animation(.easeInOut(duration: 0.15), value: isHovered)
+    }
+}
+
+// MARK: - Banners
 
 private struct RestoreBanner: View {
     let restorer: LayoutRestorer
@@ -290,8 +325,10 @@ private struct RestoreBanner: View {
     var body: some View {
         HStack(spacing: 8) {
             if restorer.isRestoring {
-                ProgressView()
-                    .controlSize(.small)
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
             }
             Text(restorer.statusText)
                 .font(.footnote)
@@ -304,5 +341,32 @@ private struct RestoreBanner: View {
             RoundedRectangle(cornerRadius: Tokens.controlCornerRadius)
                 .fill(Color.primary.opacity(0.05))
         )
+    }
+}
+
+// MARK: - Small icon button (rest, hover, disabled)
+
+struct HoverButton: View {
+    let systemImage: String
+    let help: String
+    let action: () -> Void
+
+    @State private var isHovered = false
+    @Environment(\.isEnabled) private var isEnabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isHovered && isEnabled ? Tokens.accent : Color.secondary)
+                .frame(width: 26, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: Tokens.controlCornerRadius)
+                        .fill(Color.primary.opacity(isHovered && isEnabled ? 0.08 : 0))
+                )
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .help(help)
     }
 }
